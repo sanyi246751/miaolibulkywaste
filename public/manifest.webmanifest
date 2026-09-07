@@ -1,0 +1,19 @@
+{
+  "name": "大型廢棄傢俱預約清運系統",
+  "short_name": "大型傢俱清運",
+  "description": "家戶免費大型廢棄傢俱線上預約清運申請系統",
+  "lang": "zh-TW",
+  "id": "/Miaoli/",
+  "start_url": "/Miaoli/",
+  "scope": "/Miaoli/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f7faf8",
+  "theme_color": "#047857",
+  "icons": [{"src":"/Miaoli/pwa-icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}],
+  "shortcuts": [
+    {"name":"預約清運","short_name":"立即預約","url":"/Miaoli/"},
+    {"name":"清潔隊管理後台","short_name":"管理後台","url":"/Miaoli/admin.html"},
+    {"name":"現場人員作業","short_name":"現場作業","url":"/Miaoli/work.html"}
+  ]
+}
