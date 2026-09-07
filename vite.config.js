@@ -3,8 +3,8 @@ import react from '@vitejs/plugin-react'
 import { resolve } from 'node:path'
 
 export default defineConfig(({ command, isPreview }) => ({
-  // 開發伺服器使用根路徑；正式建置與 preview 都模擬 GitHub Pages 的子路徑。
-  base: command === 'serve' && !isPreview ? '/' : '/Miaoli/',
+  // 開發伺服器使用根路徑；GitHub Pages 專案網站必須使用儲存庫名稱作為子路徑。
+  base: command === 'serve' && !isPreview ? '/' : '/miaolibulkywaste/',
   plugins: [react()],
   build: {
     // Windows 中文路徑下的 esbuild minifier 會在完成轉譯後異常結束；

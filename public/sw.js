@@ -1,4 +1,4 @@
-const CACHE_NAME = 'miaoli-removal-v4'
+const CACHE_NAME = 'miaoli-removal-v5'
 const BASE_PATH = new URL(self.registration.scope).pathname
 const fromBase = (path = '') => `${BASE_PATH}${path}`
 const APP_SHELL = [fromBase(),fromBase('index.html'),fromBase('admin.html'),fromBase('work.html'),fromBase('offline.html'),fromBase('manifest.webmanifest'),fromBase('pwa-icon.svg')]
