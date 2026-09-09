@@ -15,6 +15,7 @@ const categories = ['床墊', '櫃子', '桌子', '椅子', '電視', '冰箱', 
 const pageTabs = ['案件清單與進度', '待處理', '已排班', '清運完成', '已取消']
 const tabStatus = { '案件清單與進度': '全部', '待處理': '待處理', '已排班': '已排班', '清運完成': '清運完成', '已取消': '已取消' }
 const dispatchGroupKey = (item) => [String(item.scheduled_at || '').slice(0, 10), String(item.vehicle_no || '').trim(), String(item.dispatch_period || ''), Number(item.dispatch_trip || 1)].join('|')
+const splitCrewMembers = (value) => String(value || '').split(/[、，,\n]+/).map((member) => member.trim()).filter(Boolean)
 
 const dateTimeLocal = (value) => {
   if (!value) return ''
@@ -119,15 +120,33 @@ export default function AdminApp() {
   }, [cases, filter, keyword, useDateRange, dateFrom, dateTo])
 
   const scheduledGroupStyles = useMemo(() => {
-    const counts = visibleCases.reduce((result, item) => {
+    // 結案案件不會再顯示於已排班頁，但仍是原班次的一員；以完整班次
+    // 計數並固定由班次鍵決定顏色，避免同班案件結案後留存案件失去色框。
+    const counts = cases.filter((item) => ['已排班', '清運中', '清運完成'].includes(item.status)).reduce((result, item) => {
       const key = dispatchGroupKey(item); result[key] = (result[key] || 0) + 1; return result
     }, {})
-    let colorIndex = 0
     return Object.fromEntries(Object.keys(counts).filter((key) => counts[key] > 1).map((key) => {
-      const hue = (colorIndex++ * 47) % 360
+      const hue = Array.from(key).reduce((sum, char, index) => sum + (index + 1) * char.charCodeAt(0), 0) % 360
       return [key, { backgroundColor: `hsl(${hue} 78% 92%)`, borderColor: `hsl(${hue} 55% 48%)` }]
     }))
-  }, [visibleCases])
+  }, [cases])
+
+  const dispatchTripChoices = useMemo(() => {
+    if (!draft?.vehicle_no || !draft?.scheduled_at || !draft?.dispatch_period) return [{ trip: 1, label: '建立第 1 班', mode: 'new' }]
+    const date = String(draft.scheduled_at).slice(0, 10)
+    const used = [...new Set(cases.filter((item) => item.case_no !== draft.case_no && item.status === '已排班' && String(item.scheduled_at || '').slice(0, 10) === date && String(item.vehicle_no || '').trim() === String(draft.vehicle_no || '').trim() && item.dispatch_period === draft.dispatch_period).map((item) => Number(item.dispatch_trip || 1)))].sort((first, second) => first - second)
+    if (!used.length) return [{ trip: 1, label: '建立第 1 班', mode: 'new' }]
+    const lastTrip = used[used.length - 1]
+    return [{ trip: lastTrip, label: `併入第 ${lastTrip} 班`, mode: 'merge' }, { trip: lastTrip + 1, label: `新增第 ${lastTrip + 1} 班`, mode: 'new' }]
+  }, [cases, draft?.case_no, draft?.scheduled_at, draft?.vehicle_no, draft?.dispatch_period])
+
+  const selectDispatchTrip = (value) => {
+    const trip = Number(value)
+    const date = String(draft.scheduled_at || '').slice(0, 10)
+    const mergedCase = cases.find((item) => item.case_no !== draft.case_no && item.status === '已排班' && String(item.scheduled_at || '').slice(0, 10) === date && String(item.vehicle_no || '').trim() === String(draft.vehicle_no || '').trim() && item.dispatch_period === draft.dispatch_period && Number(item.dispatch_trip || 1) === trip)
+    // 併入既有班次時，清運人員必須沿用該班的同一組人員。
+    setDraft({ ...draft, dispatch_trip: trip, worker_name: mergedCase?.worker_name || draft.worker_name })
+  }
 
   const login = async (event) => {
     event.preventDefault()
@@ -179,7 +198,7 @@ export default function AdminApp() {
     if (draft.quantity_review_status !== '人工已核可') return setMessage('核可排班前，必須先完成逐項人工確認')
     if (!draft.scheduled_at || !draft.vehicle_no || !draft.worker_name || !draft.dispatch_period) return setMessage('請填寫管理端排定的清運日期、清運時段、車號及班組')
     if (!dispatchOptions.vehicles.some((item) => item.vehicle_no === draft.vehicle_no)) return setMessage('請由派車設定選擇有效車號')
-    if (!dispatchOptions.workers.includes(draft.worker_name)) return setMessage('請由清運人員設定選擇有效姓名')
+    if (!splitCrewMembers(draft.worker_name).every((member) => dispatchOptions.workers.includes(member))) return setMessage('請由清運人員設定選擇有效姓名')
     await save({ status: '已排班', dispatch_status: '已排班' }, '案件已核可排班', '待處理')
   }
   const withdrawCase = async () => {
@@ -258,6 +277,8 @@ export default function AdminApp() {
         {['案件清單與進度', '待處理'].includes(page) && <div className={'rounded-2xl border p-4 ' + (reviewApproved ? 'border-emerald-300 bg-emerald-50' : 'border-amber-300 bg-amber-50')}><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-black">人工逐項覆核</h3><p className="text-xs text-slate-600">僅於待處理頁進行人工確認與計費。</p></div><div className={'rounded-xl px-3 py-2 text-sm font-black ' + (reviewApproved ? 'bg-emerald-600 text-white' : 'bg-amber-200 text-amber-900')}>{reviewApproved ? '✓ 人工已核可' : '⚠ 待人工核可'}</div></div>{reviewApproved && <div className="mt-3 grid gap-2 rounded-xl border border-emerald-200 bg-white/70 p-3 text-sm font-bold text-emerald-900 sm:grid-cols-3"><span>確認總件數：{draft.quantity} 件</span><span>計費件數：{draft.chargeable_quantity || 0} 件</span><span>應收費用：NT$ {Number(draft.fee_amount || 0).toLocaleString()}</span></div>}<div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">{categories.map((name) => <label key={name} className="text-xs font-bold text-slate-600">{name}<input disabled={reviewApproved} type="number" min="0" value={reviewCounts[name] || 0} onChange={(e) => setReviewCounts((old) => ({ ...old, [name]: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100"/></label>)}</div><label className="mt-3 block text-xs font-bold text-slate-600">人工判斷依據（選填）<textarea disabled={reviewApproved} rows="2" value={draft.review_note || ''} onChange={(e) => setDraft({ ...draft, review_note: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 p-3 disabled:bg-slate-100"/></label>{page === '待處理' && (reviewApproved ? <button disabled={loading} onClick={() => setDraft({ ...draft, quantity_review_status: '待人工核可', chargeable_quantity: 0, fee_amount: 0 })} className="mt-3 rounded-xl border border-emerald-600 bg-white px-4 py-2.5 text-sm font-black text-emerald-700">修改人工確認</button> : <button disabled={loading} onClick={approveReview} className="mt-3 rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-black text-white">人工核可並試算費用</button>)}</div>}
         {['案件清單與進度', '待處理', '已排班'].includes(page) && <div className={'rounded-2xl border p-4 ' + (page === '待處理' ? 'border-amber-300 bg-amber-50' : 'border-slate-200')}><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-black">{page === '已排班' ? '已排班案件管理（唯讀）' : '待處理案件排班'}</h3>{page === '待處理' && <p className="text-xs text-slate-600">車號與姓名一律以「派車設定」為準；請先在桌面端完成設定，再由此處選擇。</p>}</div>{page === '待處理' && <div className="rounded-xl bg-amber-200 px-3 py-2 text-sm font-black text-amber-900">{reviewApproved ? '待核可排班' : '⚠ 等待人工核可'}</div>}</div><div className="mt-3 grid gap-3 sm:grid-cols-2"><Field label="管理端排定清運日期與時間（民國）"><MinguoDateTimePicker disabled={page === '已排班'} value={draft.scheduled_at} onCommit={(scheduled_at) => setDraft({ ...draft, scheduled_at })}/></Field><Field label="管理端排定清運時段"><select disabled={page === '已排班'} value={draft.dispatch_period || ''} onChange={(e) => setDraft({ ...draft, dispatch_period: e.target.value })}>{periods.map((item) => <option key={item} value={item}>{item || '請選擇'}</option>)}</select></Field><Field label="派車車號"><select disabled={page === '已排班'} value={draft.vehicle_no || ''} onChange={(e) => setDraft({ ...draft, vehicle_no: e.target.value })}><option value="">請選擇派車設定中的車號</option>{dispatchOptions.vehicles.map((item) => <option key={item.vehicle_no} value={item.vehicle_no}>{item.vehicle_no}（油耗 {item.fuel_efficiency} km/L、CO₂e {item.co2_per_liter} kg/L）</option>)}</select></Field><Field label="清運人員"><select disabled={page === '已排班'} value={draft.worker_name || ''} onChange={(e) => setDraft({ ...draft, worker_name: e.target.value })}><option value="">請選擇清運人員設定中的姓名</option>{dispatchOptions.workers.map((item) => <option key={item} value={item}>{item}</option>)}</select></Field><Field label="派車趟次"><input disabled={page === '已排班'} type="number" min="1" value={draft.dispatch_trip || 1} onChange={(e) => setDraft({ ...draft, dispatch_trip: Number(e.target.value) })}/></Field><Field label="派車備註"><input disabled={page === '已排班'} value={draft.dispatch_note || ''} onChange={(e) => setDraft({ ...draft, dispatch_note: e.target.value })}/></Field></div></div>}
         <div className="flex flex-wrap gap-3">{page === '案件清單與進度' && <><button type="button" onClick={() => { window.location.href = './index.html' }} className="rounded-xl border border-emerald-700 px-5 py-3 font-black text-emerald-800">新增案件</button><button disabled={loading || draft.status !== '已取消'} onClick={restoreCaseStatus} className="rounded-xl bg-emerald-700 px-5 py-3 font-black text-white disabled:opacity-40">恢復案件狀態</button><button disabled={loading} onClick={deleteCase} className="rounded-xl border border-rose-300 px-5 py-3 font-black text-rose-700">刪除案件</button></>}{page === '待處理' && <><button disabled={loading || !reviewApproved} onClick={schedule} className="rounded-xl bg-emerald-700 px-5 py-3 font-black text-white disabled:cursor-not-allowed disabled:bg-slate-300">{reviewApproved ? '核可排班' : '請先完成人工核可'}</button><button disabled={loading} onClick={withdrawCase} className="rounded-xl bg-rose-600 px-5 py-3 font-black text-white">撤案</button><button disabled={loading} onClick={() => save()} className="ml-auto rounded-xl border border-emerald-700 px-5 py-3 font-black text-emerald-800">儲存調度變更</button></>}{page === '已排班' && <><button disabled={loading} onClick={() => completionInput.current?.click()} className="rounded-xl bg-sky-700 px-5 py-3 font-black text-white">📸 拍照結案</button><button disabled={loading} onClick={() => save({ status: '待處理', dispatch_status: '待處理' }, '已取消排班，案件回到待處理')} className="rounded-xl bg-amber-600 px-5 py-3 font-black text-white">取消排班</button><button disabled={loading} onClick={withdrawCase} className="rounded-xl bg-rose-600 px-5 py-3 font-black text-white">撤案</button></>}{page === '清運完成' && <button type="button" onClick={() => window.print()} className="rounded-xl bg-slate-700 px-5 py-3 font-black text-white">預覽列印</button>}{page === '已取消' && <><button disabled={loading} onClick={restoreCaseStatus} className="rounded-xl bg-emerald-700 px-5 py-3 font-black text-white">恢復案件狀態</button><button disabled={loading} onClick={deleteCase} className="rounded-xl border border-rose-300 px-5 py-3 font-black text-rose-700">刪除案件</button></>}<input ref={completionInput} type="file" accept="image/*" multiple className="hidden" onChange={completeWithPhoto}/></div>
+        {page === '待處理' && <div className="-mt-3 rounded-2xl border border-sky-200 bg-sky-50 p-4"><Field label="合併／新增班次"><select value={dispatchTripChoices.some((choice) => choice.trip === Number(draft.dispatch_trip || 1)) ? Number(draft.dispatch_trip || 1) : dispatchTripChoices[dispatchTripChoices.length - 1].trip} onChange={(e) => selectDispatchTrip(e.target.value)}>{dispatchTripChoices.map((choice) => <option key={choice.trip} value={choice.trip}>{choice.label}</option>)}</select></Field><p className="mt-2 text-xs font-bold text-sky-700">選擇併入既有班次時，會自動帶入該班的清運人員。</p></div>}
+        {page === '待處理' && draft.worker_name && <p className="-mt-5 text-xs font-black text-emerald-700">本班清運人員：{draft.worker_name}</p>}
       </div>}</section>
     </div></main>
   </div>
